@@ -1,0 +1,18 @@
+# MAI Framework V2 - Host Engine Requirements
+# These are installed in a separate venv on the Mac host
+
+# MLX Framework
+mlx>=0.20.0
+mlx-lm>=0.28.4
+
+# API Server
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+httpx>=0.28.0
+
+# Configuration
+pydantic>=2.9.0
+pydantic-settings>=2.6.0
+
+# Utilities
+python-dotenv>=1.0.0

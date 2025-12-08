@@ -1,0 +1,182 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # INGRESS - Caddy Reverse Proxy
+  # ============================================
+  caddy:
+    image: caddy:2.8
+    container_name: mai-caddy
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3 support
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - mai-network
+    depends_on:
+      mai-backend:
+        condition: service_healthy
+      mai-frontend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # DATABASE - PostgreSQL with pgvector
+  # ============================================
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mai_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-mai_framework}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - mai-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mai} -d ${POSTGRES_DB:-mai_framework}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================
+  # CACHE - Redis
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: mai-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - mai-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ============================================
+  # VECTOR STORE - Qdrant
+  # ============================================
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: mai-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"  # HTTP API
+      - "6334:6334"  # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__LOG_LEVEL: INFO
+    networks:
+      - mai-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # BACKEND - FastAPI Application
+  # ============================================
+  mai-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mai-backend
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      # Override for Docker networking
+      DATABASE__URL: postgresql+asyncpg://${POSTGRES_USER:-mai}:${POSTGRES_PASSWORD:-mai_secret}@postgres:5432/${POSTGRES_DB:-mai_framework}
+      REDIS__URL: redis://redis:6379/0
+      QDRANT__URL: http://qdrant:6333
+      QDRANT__GRPC_PORT: 6334
+      # MLX Engine on host machine
+      MLXLM__BASE_URL: http://host.docker.internal:8081/v1
+      # Application settings
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      ENVIRONMENT: production
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "8000"
+    networks:
+      - mai-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================
+  # FRONTEND - React Application
+  # ============================================
+  mai-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mai-frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - mai-network
+    depends_on:
+      - mai-backend
+
+# ============================================
+# NETWORKS
+# ============================================
+networks:
+  mai-network:
+    driver: bridge
+    name: mai-network
+
+# ============================================
+# VOLUMES
+# ============================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local

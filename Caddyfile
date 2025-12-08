@@ -1,0 +1,52 @@
+# MAI Framework V2 - Caddy Configuration
+# Handles SSL termination and routing
+
+# For local development (HTTP only)
+http://localhost {
+    encode gzip
+
+    # API routes -> FastAPI backend
+    handle /api/* {
+        reverse_proxy mai-backend:8000 {
+            health_uri /health
+            health_interval 30s
+            health_timeout 5s
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # WebSocket support for streaming
+    handle /ws/* {
+        reverse_proxy mai-backend:8000
+    }
+
+    # All other routes -> React frontend
+    handle {
+        reverse_proxy mai-frontend:80
+    }
+}
+
+# For Tailscale access (auto-HTTPS via MagicDNS)
+# Replace 'mai-studio' with your machine's Tailscale hostname
+mai-studio.tail-scale-name.ts.net {
+    encode gzip
+
+    handle /api/* {
+        reverse_proxy mai-backend:8000 {
+            health_uri /health
+            health_interval 30s
+            health_timeout 5s
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    handle /ws/* {
+        reverse_proxy mai-backend:8000
+    }
+
+    handle {
+        reverse_proxy mai-frontend:80
+    }
+}
