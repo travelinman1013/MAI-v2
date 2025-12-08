@@ -146,8 +146,10 @@ services:
       dockerfile: Dockerfile
     container_name: mai-frontend
     restart: unless-stopped
+    ports:
+      - "3000:80"  # Direct access on port 3000
     expose:
-      - "80"
+      - "80"      # Internal access for Caddy proxy
     networks:
       - mai-network
     depends_on:

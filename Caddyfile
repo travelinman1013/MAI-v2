@@ -5,6 +5,14 @@
 http://localhost {
     encode gzip
 
+    # Health check routes -> FastAPI backend
+    handle /health {
+        reverse_proxy mai-backend:8000
+    }
+    handle /health/* {
+        reverse_proxy mai-backend:8000
+    }
+
     # API routes -> FastAPI backend
     handle /api/* {
         reverse_proxy mai-backend:8000 {
@@ -31,6 +39,14 @@ http://localhost {
 # Replace 'mai-studio' with your machine's Tailscale hostname
 mai-studio.tail-scale-name.ts.net {
     encode gzip
+
+    # Health check routes -> FastAPI backend
+    handle /health {
+        reverse_proxy mai-backend:8000
+    }
+    handle /health/* {
+        reverse_proxy mai-backend:8000
+    }
 
     handle /api/* {
         reverse_proxy mai-backend:8000 {
