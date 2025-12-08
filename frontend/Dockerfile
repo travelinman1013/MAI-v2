@@ -28,18 +28,18 @@ FROM nginx:stable-alpine AS final
 # Create nginx directories for non-root execution
 RUN mkdir -p /var/cache/nginx/client_temp \
     && mkdir -p /var/run/nginx \
+    && mkdir -p /var/log/nginx \
     && chown -R nginx:nginx /var/cache/nginx \
     && chown -R nginx:nginx /var/run/nginx \
-    && chown -R nginx:nginx /usr/share/nginx/html
+    && chown -R nginx:nginx /var/log/nginx \
+    && chown -R nginx:nginx /usr/share/nginx/html \
+    && chown -R nginx:nginx /etc/nginx
 
 # Copy custom nginx configuration
-COPY nginx.conf /etc/nginx/nginx.conf
+COPY --chown=nginx:nginx nginx.conf /etc/nginx/nginx.conf
 
 # Copy built files from build stage
-COPY --from=build /app/dist /usr/share/nginx/html
-
-# Change ownership
-RUN chown -R nginx:nginx /usr/share/nginx/html
+COPY --from=build --chown=nginx:nginx /app/dist /usr/share/nginx/html
 
 # Switch to non-root user
 USER nginx

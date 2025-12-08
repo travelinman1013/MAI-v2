@@ -168,15 +168,15 @@ start_mlx_server() {
 
     MLX_PID=$!
 
-    # Wait for server to be ready
-    print_info "Waiting for MLX server to be ready..."
-    local retries=30
+    # Wait for server to be ready (allow time for model download on first run)
+    print_info "Waiting for MLX server to be ready (this may take a few minutes on first run)..."
+    local retries=120
     while [[ $retries -gt 0 ]]; do
         if curl -s "http://localhost:${MLX_PORT}/v1/models" &> /dev/null; then
             print_success "MLX server is ready (PID: $MLX_PID)"
             return 0
         fi
-        sleep 2
+        sleep 3
         ((retries--))
     done
 
