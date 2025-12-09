@@ -10,6 +10,7 @@ import os
 import sys
 import json
 import time
+import signal
 import asyncio
 import subprocess
 from pathlib import Path
@@ -55,6 +56,7 @@ class ServerStatus(BaseModel):
     current_model: Optional[str]
     uptime_seconds: float
     port: int
+    restart_attempts: int = 0
 
 
 # ============================================
@@ -73,6 +75,9 @@ class MLXEngineManager:
         self.current_model: Optional[str] = None
         self.start_time: Optional[float] = None
         self._health_check_client = httpx.AsyncClient(timeout=5.0)
+        self._restart_attempts = 0
+        self._max_restart_attempts = 3
+        self._monitoring = False
 
     @property
     def mlx_url(self) -> str:
@@ -100,7 +105,8 @@ class MLXEngineManager:
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True
+            text=True,
+            preexec_fn=os.setsid  # Create new process group for clean shutdown
         )
 
         self.current_model = model
@@ -108,27 +114,61 @@ class MLXEngineManager:
 
         # Wait for server to be ready
         for _ in range(30):
+            # Check if process died during startup
+            if self.process.poll() is not None:
+                print(f"[Engine] Process died during startup (exit code: {self.process.returncode})")
+                self.process = None
+                return await self._handle_crash()
+
             if await self._is_healthy():
                 print(f"[Engine] MLX server ready on port {self.config.mlx_internal_port}")
+                self._restart_attempts = 0  # Reset on successful start
                 return True
             await asyncio.sleep(1)
 
         print("[Engine] MLX server failed to start")
         return False
 
+    async def _handle_crash(self) -> bool:
+        """Handle process crash with exponential backoff retry."""
+        self._restart_attempts += 1
+
+        if self._restart_attempts > self._max_restart_attempts:
+            print(f"[Engine] Max restart attempts ({self._max_restart_attempts}) exceeded")
+            self._restart_attempts = 0
+            return False
+
+        backoff = 2 ** self._restart_attempts
+        print(f"[Engine] Restart attempt {self._restart_attempts}/{self._max_restart_attempts} in {backoff}s")
+        await asyncio.sleep(backoff)
+
+        self.process = None
+        return await self.start(self.current_model)
+
     async def stop(self) -> bool:
         """Stop the MLX-LM server process."""
+        self._monitoring = False  # Stop monitoring first
+
         if not self.process:
             return True
 
         print("[Engine] Stopping MLX server...")
 
-        # Graceful shutdown
-        self.process.terminate()
+        # Graceful shutdown using process group
+        try:
+            os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+        except ProcessLookupError:
+            # Process already dead
+            pass
+
         try:
             self.process.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            self.process.kill()
+            # Force kill if graceful shutdown fails
+            try:
+                os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             self.process.wait()
 
         self.process = None
@@ -153,6 +193,29 @@ class MLXEngineManager:
             return response.status_code == 200
         except:
             return False
+
+    async def start_monitoring(self):
+        """Start background monitoring for crash recovery."""
+        if self._monitoring:
+            return
+
+        self._monitoring = True
+        print("[Engine] Starting process monitor")
+
+        while self._monitoring:
+            await asyncio.sleep(10)
+
+            if not self._monitoring:
+                break
+
+            if self.process and self.process.poll() is not None:
+                print(f"[Engine] Process died unexpectedly (exit code: {self.process.returncode})")
+                self.process = None
+                await self._handle_crash()
+
+    def stop_monitoring(self):
+        """Stop background monitoring."""
+        self._monitoring = False
 
     async def proxy_request(
         self,
@@ -183,7 +246,8 @@ class MLXEngineManager:
             mlx_server_running=running,
             current_model=self.current_model,
             uptime_seconds=uptime,
-            port=self.config.port
+            port=self.config.port,
+            restart_attempts=self._restart_attempts
         )
 
 
@@ -207,10 +271,15 @@ async def lifespan(app: FastAPI):
     if not success:
         print("[Engine] WARNING: MLX server failed to start")
 
+    # Start background process monitoring
+    if success:
+        asyncio.create_task(engine.start_monitoring())
+
     yield
 
     # Cleanup
     print("[Engine] Shutting down...")
+    engine.stop_monitoring()
     await engine.stop()
 
 

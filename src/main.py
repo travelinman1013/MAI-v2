@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.core.utils.config import get_settings
 from src.core.utils.logging import get_logger_with_context
 from src.infrastructure.llm.mlxlm_client import get_mlx_client
+from src.api.routes import health, chat
 
 logger = get_logger_with_context(module="main")
 settings = get_settings()
@@ -27,11 +28,11 @@ async def lifespan(app: FastAPI):
 
     # Check MLX server connection
     mlx_client = get_mlx_client()
-    health = await mlx_client.health_check()
-    if health["connected"]:
-        logger.info(f"MLX server connected. Model: {health.get('current_model')}")
+    mlx_health = await mlx_client.health_check()
+    if mlx_health["connected"]:
+        logger.info(f"MLX server connected. Model: {mlx_health.get('current_model')}")
     else:
-        logger.warning(f"MLX server not available: {health.get('error')}")
+        logger.warning(f"MLX server not available: {mlx_health.get('error')}")
         logger.warning("Chat functionality will be degraded until MLX server is available")
 
     logger.info("MAI Framework V2 started successfully!")
@@ -64,75 +65,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Health check at root level (for Docker healthcheck)
-    @app.get("/health")
-    async def health_check():
-        """Simple health check for Docker."""
-        return {"status": "healthy", "version": "2.0.0"}
-
-    @app.get("/health/detailed")
-    async def detailed_health():
-        """Detailed health check including all services."""
-        mlx_client = get_mlx_client()
-        mlx_health = await mlx_client.health_check()
-
-        return {
-            "status": "healthy",
-            "version": "2.0.0",
-            "environment": settings.environment,
-            "services": {
-                "mlx": mlx_health,
-                "database": {"status": "healthy"},  # TODO: Add actual DB check
-                "redis": {"status": "healthy"},     # TODO: Add actual Redis check
-                "qdrant": {"status": "healthy"}     # TODO: Add actual Qdrant check
-            }
-        }
-
-    # API routes placeholder (to be expanded)
-    @app.get("/api/v1/status")
-    async def api_status():
-        """API status endpoint."""
-        return {
-            "status": "operational",
-            "version": "2.0.0",
-            "framework": "MAI Framework V2"
-        }
-
-    @app.get("/api/v1/agents/llm-status")
-    async def llm_status():
-        """Get LLM connection status."""
-        mlx_client = get_mlx_client()
-        health = await mlx_client.health_check()
-
-        return {
-            "provider": "mlxlm",
-            "connected": health["connected"],
-            "model": health.get("current_model"),
-            "error": health.get("error")
-        }
-
-    @app.post("/api/v1/chat/completions")
-    async def chat_completions(request: dict):
-        """
-        Chat completions endpoint.
-        Proxies to MLX server with OpenAI-compatible format.
-        """
-        mlx_client = get_mlx_client()
-
-        messages = request.get("messages", [])
-        if not messages:
-            return {"error": "No messages provided"}
-
-        try:
-            response = await mlx_client.chat_completion(
-                messages=messages,
-                max_tokens=request.get("max_tokens"),
-                temperature=request.get("temperature")
-            )
-            return response
-        except Exception as e:
-            logger.error(f"Chat completion failed: {e}")
-            return {"error": str(e)}
+    # Include routers
+    app.include_router(health.router)
+    app.include_router(chat.router)
 
     return app
 
