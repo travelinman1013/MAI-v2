@@ -12,6 +12,8 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp"  # HTTP/3 support
+    environment:
+      - TAILSCALE_DOMAIN=${TAILSCALE_DOMAIN:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

@@ -1,8 +1,8 @@
 # MAI Framework V2 - Caddy Configuration
 # Handles SSL termination and routing
 
-# For local development (HTTP only)
-http://localhost {
+# Shared configuration snippet
+(mai_proxy) {
     encode gzip
 
     # Health check routes -> FastAPI backend
@@ -20,7 +20,6 @@ http://localhost {
             health_interval 30s
             health_timeout 5s
             header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-Proto {scheme}
         }
     }
 
@@ -35,34 +34,14 @@ http://localhost {
     }
 }
 
+# For local development (HTTP only)
+http://localhost {
+    import mai_proxy
+}
+
 # For Tailscale access (auto-HTTPS via MagicDNS)
-# Replace 'mai-studio' with your machine's Tailscale hostname
-mai-studio.tail-scale-name.ts.net {
-    encode gzip
-
-    # Health check routes -> FastAPI backend
-    handle /health {
-        reverse_proxy mai-backend:8000
-    }
-    handle /health/* {
-        reverse_proxy mai-backend:8000
-    }
-
-    handle /api/* {
-        reverse_proxy mai-backend:8000 {
-            health_uri /health
-            health_interval 30s
-            health_timeout 5s
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-        }
-    }
-
-    handle /ws/* {
-        reverse_proxy mai-backend:8000
-    }
-
-    handle {
-        reverse_proxy mai-frontend:80
-    }
+# Set TAILSCALE_DOMAIN in .env.host (e.g., mai-studio.tailnet-name.ts.net)
+# This block only activates when TAILSCALE_DOMAIN is set
+{$TAILSCALE_DOMAIN:localhost}:443 {
+    import mai_proxy
 }

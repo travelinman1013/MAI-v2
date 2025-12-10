@@ -81,20 +81,20 @@ class MLXEngineManager:
 
     @property
     def mlx_url(self) -> str:
-        return f"http://127.0.0.1:{self.config.mlx_internal_port}"
+        return f"http://127.0.0.1:{self.config.internal_port}"
 
     async def start(self, model: Optional[str] = None) -> bool:
         """Start the MLX-LM server process."""
         if self.process and self.process.poll() is None:
             return True  # Already running
 
-        model = model or self.config.default_model
+        model = model or self.config.active_model
 
         cmd = [
             sys.executable, "-m", "mlx_lm.server",
             "--model", model,
             "--host", "127.0.0.1",  # Internal only, we proxy it
-            "--port", str(self.config.mlx_internal_port),
+            "--port", str(self.config.internal_port),
             "--max-tokens", str(self.config.max_tokens),
             "--log-level", "INFO"
         ]
@@ -121,7 +121,7 @@ class MLXEngineManager:
                 return await self._handle_crash()
 
             if await self._is_healthy():
-                print(f"[Engine] MLX server ready on port {self.config.mlx_internal_port}")
+                print(f"[Engine] MLX server ready on port {self.config.internal_port}")
                 self._restart_attempts = 0  # Reset on successful start
                 return True
             await asyncio.sleep(1)
@@ -264,16 +264,17 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     print(f"[Engine] MAI Intelligence Engine starting...")
     print(f"[Engine] External port: {config.port}")
-    print(f"[Engine] Default model: {config.default_model}")
+    print(f"[Engine] Default model: {config.active_model}")
 
-    # Start MLX server
-    success = await engine.start()
-    if not success:
-        print("[Engine] WARNING: MLX server failed to start")
+    # Start MLX server in background (don't block HTTP server startup)
+    async def start_mlx_background():
+        success = await engine.start()
+        if not success:
+            print("[Engine] WARNING: MLX server failed to start")
+        else:
+            asyncio.create_task(engine.start_monitoring())
 
-    # Start background process monitoring
-    if success:
-        asyncio.create_task(engine.start_monitoring())
+    asyncio.create_task(start_mlx_background())
 
     yield
 
@@ -334,7 +335,7 @@ async def start_server(model: Optional[str] = None):
 @app.get("/models/available")
 async def list_available_models():
     """List available models in the model directory."""
-    model_dir = Path(config.model_directory)
+    model_dir = Path(config.active_model_directory)
     if not model_dir.exists():
         return {"models": []}
 
@@ -385,12 +386,21 @@ async def chat_completions(request: ChatCompletionRequest):
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Health check endpoint - always responds once wrapper is running."""
     status = engine.get_status()
     return {
-        "status": "healthy" if status.mlx_server_running else "degraded",
+        "status": "healthy" if status.mlx_server_running else "starting",
         "engine": status.model_dump()
     }
+
+
+@app.get("/ready")
+async def readiness_check():
+    """Readiness check - returns 200 only when MLX server is fully ready."""
+    status = engine.get_status()
+    if not status.mlx_server_running:
+        raise HTTPException(status_code=503, detail="MLX server not ready")
+    return {"status": "ready", "model": status.current_model}
 
 
 # ============================================

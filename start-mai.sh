@@ -130,7 +130,8 @@ setup_mlx_venv() {
         mlx-lm==0.28.4 \
         fastapi \
         uvicorn \
-        httpx
+        httpx \
+        pydantic-settings
 
     print_success "MLX virtual environment ready."
 }
@@ -139,7 +140,7 @@ setup_mlx_venv() {
 # START MLX SERVER
 # ============================================
 start_mlx_server() {
-    print_info "Starting MLX-LM server..."
+    print_info "Starting MAI Intelligence Engine (Python Wrapper)..."
     print_info "  Model: $MLX_MODEL"
     print_info "  Host: $MLX_HOST"
     print_info "  Port: $MLX_PORT"
@@ -155,32 +156,51 @@ start_mlx_server() {
         sleep 2
     fi
 
-    # Start MLX server in background
+    # Activate virtual environment
     source "${VENV_DIR}/bin/activate"
 
-    mlx_lm.server \
-        --model "$MLX_MODEL" \
-        --host "$MLX_HOST" \
-        --port "$MLX_PORT" \
-        --max-tokens "$MLX_MAX_TOKENS" \
-        --log-level INFO \
-        > "$MLX_LOG" 2>&1 &
+    # Export environment variables for the wrapper
+    export MLX_HOST="$MLX_HOST"
+    export MLX_PORT="$MLX_PORT"
+    export MLX_DEFAULT_MODEL="$MLX_MODEL"
+    export MLX_MAX_TOKENS="$MLX_MAX_TOKENS"
+
+    # Start the Python wrapper instead of raw mlx_lm.server
+    python3 "${SCRIPT_DIR}/host_engine/server.py" > "$MLX_LOG" 2>&1 &
 
     MLX_PID=$!
 
-    # Wait for server to be ready (allow time for model download on first run)
-    print_info "Waiting for MLX server to be ready (this may take a few minutes on first run)..."
+    # Wait for wrapper to be responsive first (quick check)
+    print_info "Waiting for Intelligence Engine wrapper to start..."
+    local wrapper_retries=30
+    while [[ $wrapper_retries -gt 0 ]]; do
+        if curl -s "http://localhost:${MLX_PORT}/health" &> /dev/null; then
+            print_success "Intelligence Engine wrapper is running"
+            break
+        fi
+        sleep 1
+        ((wrapper_retries--))
+    done
+
+    if [[ $wrapper_retries -eq 0 ]]; then
+        print_error "Intelligence Engine wrapper failed to start. Check logs at $MLX_LOG"
+        exit 1
+    fi
+
+    # Wait for MLX model to be loaded (use /ready endpoint)
+    print_info "Waiting for model to load (this may take a few minutes on first run)..."
     local retries=120
     while [[ $retries -gt 0 ]]; do
-        if curl -s "http://localhost:${MLX_PORT}/v1/models" &> /dev/null; then
-            print_success "MLX server is ready (PID: $MLX_PID)"
+        # Use the wrapper's /ready endpoint which checks MLX server status
+        if curl -s "http://localhost:${MLX_PORT}/ready" &> /dev/null; then
+            print_success "Intelligence Engine is ready (PID: $MLX_PID)"
             return 0
         fi
         sleep 3
         ((retries--))
     done
 
-    print_error "MLX server failed to start. Check logs at $MLX_LOG"
+    print_error "Intelligence Engine failed to start. Check logs at $MLX_LOG"
     exit 1
 }
 

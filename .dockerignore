@@ -1,0 +1,84 @@
+# ===========================================
+# MAI Framework V2 - Docker Build Exclusions
+# ===========================================
+
+# Host Engine (runs on bare metal, not in Docker)
+host_engine/
+.env.host
+
+# Git
+.git/
+.gitignore
+
+# IDE and Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+.eggs/
+*.egg-info/
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Node.js (frontend rebuilds in Docker)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+.yarn/
+
+# Build artifacts
+dist/
+build/
+*.log
+
+# Runtime
+logs/
+*.log
+*.pid
+
+# Documentation and non-essential
+*.md
+!README.md
+LICENSE
+docs/
+prompts/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Secrets and local config
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# Test artifacts
+coverage/
+.nyc_output/
+test-results/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
